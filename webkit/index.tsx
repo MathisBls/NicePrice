@@ -3,8 +3,8 @@ import { callable } from '@steambrew/webkit';
 const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices');
 
 const ID = 'niceprice-store';
-const STYLES = 'niceprice-store-css';
-const SIDEBAR = 'div.rightcol.game_meta_data';
+const STYLES_ID = 'niceprice-store-css';
+const SIDEBAR_SEL = 'div.rightcol.game_meta_data';
 
 const ICONS = {
   tag: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#67c1f5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
@@ -15,23 +15,25 @@ const ICONS = {
 
 interface Prices { currentRetail: string|null; currentKeyshops: string|null; historicalRetail: string|null; historicalKeyshops: string|null; currency: string; }
 interface Game { title: string; url: string; prices: Prices; }
-interface Response { success: boolean; data: Record<string, Game|null>; error?: string; }
+interface ApiResponse { success: boolean; data: Record<string, Game|null>; error?: string; }
+
+const SYMBOLS: Record<string,string> = { EUR:'€', USD:'$', GBP:'£', PLN:'zł', BRL:'R$', CHF:'CHF', DKK:'kr', NOK:'kr', SEK:'kr', CAD:'CA$', AUD:'A$' };
+const SUFFIX_CURRENCIES = ['EUR','PLN','BRL','CHF','DKK','NOK','SEK'];
 
 function fmt(val: string|null, cur: string): string {
   if (!val) return '';
   const n = parseFloat(val);
   if (isNaN(n)) return '';
   if (n === 0) return 'FREE';
-  const sym: Record<string,string> = { EUR:'€', USD:'$', GBP:'£', PLN:'zł', BRL:'R$', CHF:'CHF', DKK:'kr', NOK:'kr', SEK:'kr', CAD:'CA$', AUD:'A$' };
-  const s = sym[cur] || cur;
-  return ['EUR','PLN','BRL','CHF','DKK','NOK','SEK'].includes(cur) ? `${n.toFixed(2)}${s}` : `${s}${n.toFixed(2)}`;
+  const sym = SYMBOLS[cur] || cur;
+  return SUFFIX_CURRENCIES.includes(cur) ? `${n.toFixed(2)}${sym}` : `${sym}${n.toFixed(2)}`;
 }
 
-function injectStyles() {
-  if (document.getElementById(STYLES)) return;
-  const s = document.createElement('style');
-  s.id = STYLES;
-  s.textContent = `
+function ensureStyles() {
+  if (document.getElementById(STYLES_ID)) return;
+  const el = document.createElement('style');
+  el.id = STYLES_ID;
+  el.textContent = `
 #${ID} { background:rgba(0,0,0,.2); margin-bottom:12px; border-radius:2px; overflow:hidden; }
 .nps-hdr { display:flex; align-items:center; gap:6px; padding:8px 14px; background:rgba(102,192,244,.06); border-bottom:1px solid rgba(255,255,255,.06); }
 .nps-title { color:#67c1f5; font-size:10px; font-weight:bold; text-transform:uppercase; letter-spacing:1px; }
@@ -53,29 +55,42 @@ function injectStyles() {
 .nps-msg { padding:10px 14px; color:#556b7e; font-size:12px; }
 .nps-msg a { color:#67c1f5; }
 `;
-  document.head.appendChild(s);
+  document.head.appendChild(el);
+}
+
+function header(withBadge = true) {
+  return `<div class="nps-hdr">${ICONS.tag}<span class="nps-title">NicePrice</span>${withBadge ? '<span class="nps-badge">GG.deals</span>' : ''}</div>`;
+}
+
+function findRef(sidebar: Element) {
+  return sidebar.querySelector('[id*="steamdb"],[class*="steamdb"]') || sidebar.firstChild;
+}
+
+function priceRow(icon: string, label: string, value: string, cls: string) {
+  if (value) return `<div class="nps-row"><span class="nps-row-icon">${icon}</span><span class="nps-row-label">${label}</span><span class="nps-val ${cls}">${value}</span></div>`;
+  return `<div class="nps-row"><span class="nps-row-icon">${icon}</span><span class="nps-row-label">${label}</span><span class="nps-na">N/A</span></div>`;
 }
 
 async function inject(appId: number) {
-  injectStyles();
-  const sidebar = document.querySelector(SIDEBAR);
+  ensureStyles();
+  const sidebar = document.querySelector(SIDEBAR_SEL);
   if (!sidebar) return;
-  document.getElementById(ID)?.remove();
 
-  const ref = sidebar.querySelector('[id*="steamdb"],[class*="steamdb"]') || sidebar.firstChild;
+  document.getElementById(ID)?.remove();
   const ph = document.createElement('div');
   ph.id = ID;
-  ph.innerHTML = `<div class="nps-hdr">${ICONS.tag}<span class="nps-title">NicePrice</span><span class="nps-badge">GG.deals</span></div><div class="nps-msg">Loading...</div>`;
-  sidebar.insertBefore(ph, ref);
+  ph.innerHTML = `${header()}<div class="nps-msg">Loading...</div>`;
+  sidebar.insertBefore(ph, findRef(sidebar));
 
   try {
-    const resp: Response = JSON.parse(await fetchPrices({ steam_app_id: String(appId) }));
+    const resp: ApiResponse = JSON.parse(await fetchPrices({ steam_app_id: String(appId) }));
 
     if (!resp.success) {
       const el = document.getElementById(ID);
       if (!el) return;
       if (resp.error === 'no_api_key' || resp.error === 'invalid_api_key') {
-        el.innerHTML = `<div class="nps-hdr">${ICONS.tag}<span class="nps-title">NicePrice</span></div><div class="nps-msg">${resp.error === 'no_api_key' ? 'API key required' : 'Invalid API key'} — <a href="https://gg.deals/api/" target="_blank">Get a free key</a></div>`;
+        const msg = resp.error === 'no_api_key' ? 'API key required' : 'Invalid API key';
+        el.innerHTML = `${header(false)}<div class="nps-msg">${msg} — <a href="https://gg.deals/api/" target="_blank">Get a free key</a></div>`;
       } else {
         el.querySelector('.nps-msg')!.textContent = resp.error === 'rate_limited' ? 'Rate limited' : 'Could not load';
       }
@@ -83,27 +98,34 @@ async function inject(appId: number) {
     }
 
     const game = resp.data?.[String(appId)];
-    if (!game?.prices) { const el = document.getElementById(ID); if (el) el.querySelector('.nps-msg')!.textContent = 'No data'; return; }
+    if (!game?.prices) {
+      const el = document.getElementById(ID);
+      if (el) el.querySelector('.nps-msg')!.textContent = 'No data';
+      return;
+    }
 
     const { prices: p } = game;
     const cur = p.currency || 'EUR';
     const url = game.url || `https://gg.deals/steam-app/${appId}/`;
 
-    let rows = '';
     const retail = fmt(p.currentRetail, cur);
     const keyshop = fmt(p.currentKeyshops, cur);
-    rows += `<div class="nps-row"><span class="nps-row-icon">${ICONS.retail}</span><span class="nps-row-label">Best retail</span>${retail ? `<span class="nps-val retail">${retail}</span>` : '<span class="nps-na">N/A</span>'}</div>`;
-    rows += `<div class="nps-row"><span class="nps-row-icon">${ICONS.key}</span><span class="nps-row-label">Best keyshop</span>${keyshop ? `<span class="nps-val keyshop">${keyshop}</span>` : '<span class="nps-na">N/A</span>'}</div>`;
+    let rows = priceRow(ICONS.retail, 'Best retail', retail, 'retail');
+    rows += priceRow(ICONS.key, 'Best keyshop', keyshop, 'keyshop');
 
-    const hist = [fmt(p.historicalRetail, cur) && `Retail: ${fmt(p.historicalRetail, cur)}`, fmt(p.historicalKeyshops, cur) && `Key: ${fmt(p.historicalKeyshops, cur)}`].filter(Boolean);
-    if (hist.length) rows += `<div class="nps-div"></div><div class="nps-row"><span class="nps-row-icon">${ICONS.clock}</span><span class="nps-row-label">Historical low</span><span class="nps-val hist">${hist.join(' / ')}</span></div>`;
+    const histParts = [
+      fmt(p.historicalRetail, cur) && `Retail: ${fmt(p.historicalRetail, cur)}`,
+      fmt(p.historicalKeyshops, cur) && `Key: ${fmt(p.historicalKeyshops, cur)}`,
+    ].filter(Boolean);
+    if (histParts.length) {
+      rows += `<div class="nps-div"></div><div class="nps-row"><span class="nps-row-icon">${ICONS.clock}</span><span class="nps-row-label">Historical low</span><span class="nps-val hist">${histParts.join(' / ')}</span></div>`;
+    }
 
     document.getElementById(ID)?.remove();
     const w = document.createElement('div');
     w.id = ID;
-    w.innerHTML = `<div class="nps-hdr">${ICONS.tag}<span class="nps-title">NicePrice</span><span class="nps-badge">GG.deals</span></div><div class="nps-body"><div class="nps-rows">${rows}</div></div><div class="nps-ftr"><a href="${url}" target="_blank">View all deals on GG.deals →</a></div>`;
-    const ref2 = sidebar.querySelector('[id*="steamdb"],[class*="steamdb"]') || sidebar.firstChild;
-    sidebar.insertBefore(w, ref2);
+    w.innerHTML = `${header()}<div class="nps-body"><div class="nps-rows">${rows}</div></div><div class="nps-ftr"><a href="${url}" target="_blank">View all deals on GG.deals →</a></div>`;
+    sidebar.insertBefore(w, findRef(sidebar));
   } catch {
     document.getElementById(ID)?.remove();
   }

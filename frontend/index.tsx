@@ -4,21 +4,18 @@ const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices')
 const getApiKey = callable<[], string>('get_api_key');
 const saveApiKey = callable<[{ api_key: string }], string>('save_api_key');
 
-let currentAppId: number | null = null;
-let activeObserver: MutationObserver | null = null;
-let fetchingAppId: number | null = null;
-let hasApiKey: boolean | null = null;
+let curAppId: number | null = null;
+let observer: MutationObserver | null = null;
+let fetching: number | null = null;
+let hasKey: boolean | null = null;
 
 const ID = 'niceprice-widget';
-const STYLES = 'niceprice-styles';
 const CONTAINER = '.NZMJ6g2iVnFsOOp-lDmIP';
-const GG_API_URL = 'https://gg.deals/api/';
+const GG_URL = 'https://gg.deals/api/';
 
-function openExternal(url: string) {
-  window.open(`steam://openurl_external/${url}`);
-}
+const openExt = (url: string) => window.open(`steam://openurl_external/${url}`);
 
-function readThemeColors(doc: Document) {
+function readColors(doc: Document) {
   const c = { bg: 'rgba(14,20,27,0.85)', text: '#fff', dim: 'rgba(255,255,255,0.6)', accent: '#1a9fff', border: 'rgba(255,255,255,0.1)' };
   try {
     const s = doc.defaultView?.getComputedStyle(doc.body);
@@ -76,21 +73,6 @@ interface Prices { currentRetail: string|null; currentKeyshops: string|null; his
 interface Game { title: string; url: string; prices: Prices; }
 interface Response { success: boolean; data: Record<string, Game|null>; error?: string; }
 
-function injectStyles(doc: Document) {
-  if (doc.getElementById(STYLES)) return;
-  const s = doc.createElement('style'); s.id = STYLES; s.textContent = CSS;
-  doc.head.appendChild(s);
-}
-
-function applyColors(el: HTMLElement, doc: Document) {
-  const c = readThemeColors(doc);
-  el.style.setProperty('--np-bg', c.bg);
-  el.style.setProperty('--np-text', c.text);
-  el.style.setProperty('--np-dim', c.dim);
-  el.style.setProperty('--np-accent', c.accent);
-  el.style.setProperty('--np-border', c.border);
-}
-
 function detectAppId(): number | null {
   try {
     const p = (window as any).MainWindowBrowserManager?.m_lastLocation?.pathname;
@@ -104,60 +86,63 @@ function fmt(val: string|null, cur: string): string {
   const n = parseFloat(val);
   if (isNaN(n)) return '';
   if (n === 0) return 'FREE';
-  const sym: Record<string, string> = { EUR:'€', USD:'$', GBP:'£', PLN:'zł', BRL:'R$', CHF:'CHF', DKK:'kr', NOK:'kr', SEK:'kr', CAD:'CA$', AUD:'A$' };
+  const sym: Record<string,string> = { EUR:'€', USD:'$', GBP:'£', PLN:'zł', BRL:'R$', CHF:'CHF', DKK:'kr', NOK:'kr', SEK:'kr', CAD:'CA$', AUD:'A$' };
   const s = sym[cur] || cur;
   return ['EUR','PLN','BRL','CHF','DKK','NOK','SEK'].includes(cur) ? `${n.toFixed(2)}${s}` : `${s}${n.toFixed(2)}`;
 }
 
-function bindClicks(el: HTMLElement) {
-  el.querySelectorAll('[data-url]').forEach(d => {
-    (d as HTMLElement).addEventListener('click', () => {
-      const url = (d as HTMLElement).dataset.url;
-      if (url) openExternal(url);
-    });
-  });
+function wireClicks(el: HTMLElement) {
+  el.querySelectorAll<HTMLElement>('[data-url]').forEach(d =>
+    d.addEventListener('click', () => d.dataset.url && openExt(d.dataset.url))
+  );
 }
 
-async function checkApiKey(): Promise<boolean> {
-  try { const r = JSON.parse(await getApiKey()); hasApiKey = (r.api_key || '').length > 0; } catch { hasApiKey = false; }
-  return hasApiKey!;
+async function checkKey(): Promise<boolean> {
+  try { const r = JSON.parse(await getApiKey()); hasKey = (r.api_key || '').length > 0; } catch { hasKey = false; }
+  return hasKey!;
 }
 
-async function waitForContainer(doc: Document, maxWait = 3000): Promise<HTMLElement | null> {
-  const el = doc.querySelector(CONTAINER) as HTMLElement;
-  if (el) return el;
-  return new Promise(resolve => {
-    let elapsed = 0;
-    const interval = setInterval(() => {
-      elapsed += 100;
+async function waitContainer(doc: Document, timeout = 3000): Promise<HTMLElement | null> {
+  const found = doc.querySelector(CONTAINER) as HTMLElement;
+  if (found) return found;
+  return new Promise(res => {
+    let t = 0;
+    const iv = setInterval(() => {
+      t += 100;
       const el = doc.querySelector(CONTAINER) as HTMLElement;
-      if (el || elapsed >= maxWait) { clearInterval(interval); resolve(el); }
+      if (el || t >= timeout) { clearInterval(iv); res(el); }
     }, 100);
   });
 }
 
-async function injectWidget(doc: Document, appId: number) {
-  if (currentAppId === appId && doc.getElementById(ID)) return;
-  if (fetchingAppId === appId) return;
+async function inject(doc: Document, appId: number) {
+  if (curAppId === appId && doc.getElementById(ID)) return;
+  if (fetching === appId) return;
 
   doc.getElementById(ID)?.remove();
-  fetchingAppId = appId;
+  fetching = appId;
 
-  const container = await waitForContainer(doc);
-  if (!container || detectAppId() !== appId) { fetchingAppId = null; return; }
+  const container = await waitContainer(doc);
+  if (!container || detectAppId() !== appId) { fetching = null; return; }
 
-  currentAppId = appId;
+  curAppId = appId;
   container.style.position = 'relative';
 
   const w = doc.createElement('div');
   w.id = ID;
-  applyColors(w, doc);
+  // apply theme vars
+  const colors = readColors(doc);
+  w.style.setProperty('--np-bg', colors.bg);
+  w.style.setProperty('--np-text', colors.text);
+  w.style.setProperty('--np-dim', colors.dim);
+  w.style.setProperty('--np-accent', colors.accent);
+  w.style.setProperty('--np-border', colors.border);
 
-  if (hasApiKey === false) {
-    w.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">API key required —</span><span class="np-setup-link" data-url="${GG_API_URL}">Get your free key on GG.deals</span><span class="np-setup-text">then add it in NicePrice settings</span></div></div>`;
+  if (hasKey === false) {
+    w.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">API key required —</span><span class="np-setup-link" data-url="${GG_URL}">Get your free key on GG.deals</span><span class="np-setup-text">then add it in NicePrice settings</span></div></div>`;
     container.appendChild(w);
-    bindClicks(w);
-    fetchingAppId = null;
+    wireClicks(w);
+    fetching = null;
     return;
   }
 
@@ -166,25 +151,25 @@ async function injectWidget(doc: Document, appId: number) {
 
   try {
     const resp: Response = JSON.parse(await fetchPrices({ steam_app_id: String(appId) }));
-    if (currentAppId !== appId) { fetchingAppId = null; return; }
+    if (curAppId !== appId) { fetching = null; return; }
     const el = doc.getElementById(ID);
-    if (!el) { fetchingAppId = null; return; }
+    if (!el) { fetching = null; return; }
 
     if (!resp.success) {
       if (resp.error === 'no_api_key' || resp.error === 'invalid_api_key') {
-        hasApiKey = false;
-        el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">${resp.error === 'no_api_key' ? 'API key required —' : 'Invalid API key —'}</span><span class="np-setup-link" data-url="${GG_API_URL}">Get your free key</span><span class="np-setup-text">then add it in settings</span></div></div>`;
-        bindClicks(el);
+        hasKey = false;
+        el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">${resp.error === 'no_api_key' ? 'API key required —' : 'Invalid API key —'}</span><span class="np-setup-link" data-url="${GG_URL}">Get your free key</span><span class="np-setup-text">then add it in settings</span></div></div>`;
+        wireClicks(el);
       } else {
         el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">${resp.error === 'rate_limited' ? 'Rate limited, try later' : 'Could not load prices'}</span></div>`;
       }
-      fetchingAppId = null; return;
+      fetching = null; return;
     }
 
     const game = resp.data?.[String(appId)];
     if (!game?.prices) {
       el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">No price data</span></div>`;
-      fetchingAppId = null; return;
+      fetching = null; return;
     }
 
     const { prices: p } = game;
@@ -205,28 +190,34 @@ async function injectWidget(doc: Document, appId: number) {
       el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">No deals available</span></div>`;
     } else {
       el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-deals">${html}</div><span class="np-link" data-url="${url}">GG.deals →</span></div>`;
-      bindClicks(el);
+      wireClicks(el);
     }
   } catch {
     const el = doc.getElementById(ID);
     if (el) el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">Failed to load</span></div>`;
   }
-  fetchingAppId = null;
+  fetching = null;
 }
 
 function handlePage(doc: Document) {
   const id = detectAppId();
-  if (id && (id !== currentAppId || !doc.getElementById(ID))) injectWidget(doc, id);
-  else if (!id && currentAppId) { doc.getElementById(ID)?.remove(); currentAppId = null; }
+  if (id && (id !== curAppId || !doc.getElementById(ID))) inject(doc, id);
+  else if (!id && curAppId) { doc.getElementById(ID)?.remove(); curAppId = null; }
 }
 
 function setup(doc: Document) {
-  if (activeObserver) { activeObserver.disconnect(); activeObserver = null; }
-  currentAppId = null; fetchingAppId = null;
-  injectStyles(doc);
+  if (observer) { observer.disconnect(); observer = null; }
+  curAppId = null; fetching = null;
+
+  // inject styles once
+  if (!doc.getElementById('np-styles')) {
+    const s = doc.createElement('style'); s.id = 'np-styles'; s.textContent = CSS;
+    doc.head.appendChild(s);
+  }
+
   handlePage(doc);
-  activeObserver = new MutationObserver(() => handlePage(doc));
-  if (doc.body) activeObserver.observe(doc.body, { childList: true, subtree: true });
+  observer = new MutationObserver(() => handlePage(doc));
+  if (doc.body) observer.observe(doc.body, { childList: true, subtree: true });
 }
 
 function Settings() {
@@ -246,8 +237,8 @@ function Settings() {
     setStatus('Saving...');
     try {
       const r = JSON.parse(await saveApiKey({ api_key: key.trim() }));
-      hasApiKey = key.trim().length > 0;
-      currentAppId = null;
+      hasKey = key.trim().length > 0;
+      curAppId = null;
       setStatus(r.success ? (key.trim() ? '✓ Saved' : '✓ Removed') : '✗ Failed');
     } catch { setStatus('✗ Error'); }
     setTimeout(() => setStatus(''), 3000);
@@ -272,7 +263,7 @@ function Settings() {
     ),
     R.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 12 } },
       R.createElement('button', { onClick: save, style: { padding: '8px 20px', fontSize: 12, fontWeight: 600, background: '#1a9fff', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' } }, 'Save'),
-      R.createElement('button', { onClick: () => openExternal(GG_API_URL), style: { padding: '8px 20px', fontSize: 12, fontWeight: 600, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, cursor: 'pointer' } }, 'Get a free key →'),
+      R.createElement('button', { onClick: () => openExt(GG_URL), style: { padding: '8px 20px', fontSize: 12, fontWeight: 600, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, cursor: 'pointer' } }, 'Get a free key →'),
     ),
     status && R.createElement('div', { style: { fontSize: 12, marginBottom: 12, padding: '6px 10px', borderRadius: 4, background: status[0] === '✓' ? 'rgba(36,166,90,0.15)' : 'rgba(240,74,74,0.15)', color: status[0] === '✓' ? '#24a65a' : '#f04a4a' } }, status),
     R.createElement('div', { style: { background: 'rgba(255,255,255,0.03)', borderRadius: 4, padding: 12, fontSize: 11, color: '#8f98a0', lineHeight: 1.5 } },
@@ -286,7 +277,7 @@ function Settings() {
 }
 
 export default definePlugin(() => {
-  checkApiKey();
+  checkKey();
   Millennium.AddWindowCreateHook?.((ctx: any) => {
     if (!ctx?.m_strName?.startsWith('SP ')) return;
     const doc = ctx.m_popup?.document;
