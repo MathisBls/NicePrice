@@ -57,6 +57,8 @@ Best retail, keyshop and historical lowest prices displayed directly on the game
 
 ![Library](screenshots/library.png)
 
+This is useful when your friends don't own a game yet, you can quickly check the lowest price for them without leaving Steam.
+
 ### Millennium Plugins
 
 NicePrice in the Millennium plugin list. Right-click to access settings.
