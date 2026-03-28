@@ -9,7 +9,7 @@ Compare game prices across 30+ stores directly inside the Steam client. See the 
 - Direct links to GG.deals for full deal listings
 - Works in both Steam Library and Store pages
 - Auto-adapts to any Steam theme
-- Your API key stays local — stored in `settings.json`, never sent anywhere except GG.deals
+- Your API key stays local, stored in `settings.json`, never sent anywhere except GG.deals
 
 ## Installation
 
@@ -51,7 +51,7 @@ Your API key is masked in the input field and stored locally in `settings.json`.
 
 ## Screenshots
 
-### Library — Price Bar
+### Library | Price Bar
 
 Best retail, keyshop and historical lowest prices displayed directly on the game page.
 
