@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "jsxFactory": "window.SP_REACT.createElement",
+    "jsxFragmentFactory": "window.SP_REACT.Fragment",
+    "jsx": "react",
+    "outDir": "../.millennium/Dist",
+    "rootDir": "."
+  },
+  "include": ["./**/*.ts", "./**/*.tsx"]
+}

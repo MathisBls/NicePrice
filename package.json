@@ -1,0 +1,17 @@
+{
+  "name": "nice-price",
+  "version": "2.0.0",
+  "description": "Compare game prices across 30+ stores directly in Steam",
+  "type": "module",
+  "main": "./frontend/index.tsx",
+  "scripts": {
+    "dev": "millennium-ttc --build dev",
+    "build": "millennium-ttc --build prod"
+  },
+  "dependencies": {
+    "@steambrew/api": "^5.5.3",
+    "@steambrew/client": "^5.5.3",
+    "@steambrew/ttc": "^2.7.3",
+    "@steambrew/webkit": "^5.5.3"
+  }
+}
