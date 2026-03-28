@@ -13,7 +13,7 @@ Compare game prices across 30+ stores directly inside the Steam client. See the 
 
 ## Installation
 
-### Via Millennium (recommended)
+### Via Millennium
 
 1. Install [Millennium](https://steambrew.app/) if you haven't already
 2. Open Steam, go to the Millennium plugin browser
