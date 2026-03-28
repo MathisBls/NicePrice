@@ -262,7 +262,7 @@ function Settings() {
     R.createElement('div', { style: { marginBottom: 16 } },
       R.createElement('label', { style: { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 } }, 'GG.deals API Key'),
       R.createElement('input', {
-        type: 'text', value: key, onChange: (e: any) => setKey(e.target.value),
+        type: 'password', value: key, onChange: (e: any) => setKey(e.target.value),
         placeholder: 'Paste your API key here...',
         style: { width: '100%', padding: '8px 12px', fontSize: 13, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#fff', outline: 'none', boxSizing: 'border-box' as const },
       }),
