@@ -79,6 +79,8 @@ NicePrice/
 
 ## Credits
 
+- Idea by [Thomas Bortolato](https://github.com/thomas370)
+- Developed by [Mathis Boulais](https://github.com/MathisBls/)
 - Price data by [GG.deals](https://gg.deals/)
 - Built on [Millennium](https://steambrew.app/)
 
