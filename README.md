@@ -59,6 +59,12 @@ Best retail, keyshop and historical lowest prices displayed directly on the game
 
 This is useful when your friends don't own a game yet, you can quickly check the lowest price for them without leaving Steam.
 
+### Store | Price Box
+
+Price comparison widget displayed directly in the Steam Store sidebar.
+
+![Store](screenshots/store.png)
+
 ### Millennium Plugins
 
 NicePrice in the Millennium plugin list. Right-click to access settings.
