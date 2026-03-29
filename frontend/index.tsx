@@ -1,4 +1,5 @@
 import { Millennium, IconsModule, definePlugin, callable } from '@steambrew/client';
+import type { MilleniumWindowContext } from './types/millennium';
 
 const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices');
 const getApiKey = callable<[], string>('get_api_key');
@@ -75,7 +76,7 @@ interface Response { success: boolean; data: Record<string, Game|null>; error?: 
 
 function detectAppId(): number | null {
   try {
-    const p = (window as any).MainWindowBrowserManager?.m_lastLocation?.pathname;
+    const p = window.MainWindowBrowserManager?.m_lastLocation?.pathname;
     if (p) { const m = p.match(/\/app\/(\d+)/); if (m) return parseInt(m[1], 10); }
   } catch {}
   return null;
@@ -253,7 +254,7 @@ function Settings() {
     R.createElement('div', { style: { marginBottom: 16 } },
       R.createElement('label', { style: { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 } }, 'GG.deals API Key'),
       R.createElement('input', {
-        type: 'password', value: key, onChange: (e: any) => setKey(e.target.value),
+        type: 'password', value: key, onChange: (e:{ target: { value: string } }) => setKey(e.target.value),
         placeholder: 'Paste your API key here...',
         style: { width: '100%', padding: '8px 12px', fontSize: 13, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#fff', outline: 'none', boxSizing: 'border-box' as const },
       }),
@@ -278,7 +279,7 @@ function Settings() {
 
 export default definePlugin(() => {
   checkKey();
-  Millennium.AddWindowCreateHook?.((ctx: any) => {
+  Millennium.AddWindowCreateHook?.((ctx: MilleniumWindowContext) => {
     if (!ctx?.m_strName?.startsWith('SP ')) return;
     const doc = ctx.m_popup?.document;
     if (!doc?.body) return;
@@ -290,5 +291,3 @@ export default definePlugin(() => {
     content: window.SP_REACT.createElement(Settings, null),
   };
 });
-
-declare global { interface Window { SP_REACT: any; MainWindowBrowserManager: any; } }

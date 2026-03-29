@@ -132,9 +132,22 @@ async function inject(appId: number) {
 }
 
 export default async function WebkitMain() {
+  const tryInject = () => {
   const m = window.location.href.match(/store\.steampowered\.com\/app\/(\d+)/);
   if (!m) return;
   const id = parseInt(m[1], 10);
   if (isNaN(id) || id <= 0) return;
-  await inject(id);
+  inject(id);
+};
+
+  tryInject();
+
+let lastUrl = window.location.href;
+  new MutationObserver(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      document.getElementById(ID)?.remove();
+      tryInject();
+    }
+  }).observe(document.body, { childList: true, subtree: true });
 }
