@@ -17,7 +17,6 @@ interface MilleniumWindowContext {
 
 declare global {
     interface Window {
-        SP_REACT: typeof import('react');
         MainWindowBrowserManager?: MainWindowBrowserManager;
     }
 }

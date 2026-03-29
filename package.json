@@ -1,6 +1,6 @@
 {
   "name": "nice-price",
-  "version": "2.0.0",
+  "version": "1.0.1",
   "description": "Compare game prices across 30+ stores directly in Steam",
   "type": "module",
   "main": "./frontend/index.tsx",
@@ -13,5 +13,8 @@
     "@steambrew/client": "^5.5.3",
     "@steambrew/ttc": "^2.7.3",
     "@steambrew/webkit": "^5.5.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
   }
 }

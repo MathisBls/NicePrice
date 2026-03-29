@@ -3,6 +3,6 @@
   "name": "nice-price",
   "common_name": "NicePrice",
   "description": "Compare game prices across 30+ stores directly in Steam. Best retail and keyshop deals powered by GG.deals.",
-  "version": "2.0.0",
+  "version": "1.0.1",
   "backendType": "lua"
 }

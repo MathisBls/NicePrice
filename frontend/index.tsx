@@ -1,4 +1,5 @@
-import { Millennium, IconsModule, definePlugin, callable } from '@steambrew/client';
+import { useState, useEffect } from 'react';
+import { Millennium, IconsModule, definePlugin, callable, TextField, DialogButton, Field, Focusable } from '@steambrew/client';
 import type { MilleniumWindowContext } from './types/millennium';
 
 const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices');
@@ -222,12 +223,11 @@ function setup(doc: Document) {
 }
 
 function Settings() {
-  const R = window.SP_REACT;
-  const [key, setKey] = R.useState('');
-  const [status, setStatus] = R.useState('');
-  const [loaded, setLoaded] = R.useState(false);
+  const [key, setKey] = useState('');
+  const [status, setStatus] = useState('');
+  const [loaded, setLoaded] = useState(false);
 
-  R.useEffect(() => {
+  useEffect(() => {
     getApiKey().then((raw: string) => {
       try { const r = JSON.parse(raw); if (r.api_key) setKey(r.api_key); } catch {}
       setLoaded(true);
@@ -247,33 +247,53 @@ function Settings() {
 
   const mask = (k: string) => k.length <= 8 ? k : k.slice(0, 4) + '•'.repeat(k.length - 8) + k.slice(-4);
 
-  if (!loaded) return R.createElement('div', { style: { padding: 16, color: '#c6d4df' } }, 'Loading...');
+  const btnStyle = {
+    padding: '8px 16px', fontSize: 12, fontWeight: 600,
+    borderRadius: 2, cursor: 'pointer',
+    width: 'auto', minWidth: 0,
+  };
 
-  return R.createElement('div', { style: { padding: 16, color: '#c6d4df' } },
-    R.createElement('div', { style: { fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16 } }, 'NicePrice'),
-    R.createElement('div', { style: { marginBottom: 16 } },
-      R.createElement('label', { style: { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 } }, 'GG.deals API Key'),
-      R.createElement('input', {
-        type: 'password', value: key, onChange: (e:{ target: { value: string } }) => setKey(e.target.value),
-        placeholder: 'Paste your API key here...',
-        style: { width: '100%', padding: '8px 12px', fontSize: 13, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#fff', outline: 'none', boxSizing: 'border-box' as const },
-      }),
-      R.createElement('div', { style: { fontSize: 11, color: '#8f98a0', marginTop: 6 } },
-        key ? `Current: ${mask(key)}` : 'No key configured'
-      ),
-    ),
-    R.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 12 } },
-      R.createElement('button', { onClick: save, style: { padding: '8px 20px', fontSize: 12, fontWeight: 600, background: '#1a9fff', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' } }, 'Save'),
-      R.createElement('button', { onClick: () => openExt(GG_URL), style: { padding: '8px 20px', fontSize: 12, fontWeight: 600, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, cursor: 'pointer' } }, 'Get a free key →'),
-    ),
-    status && R.createElement('div', { style: { fontSize: 12, marginBottom: 12, padding: '6px 10px', borderRadius: 4, background: status[0] === '✓' ? 'rgba(36,166,90,0.15)' : 'rgba(240,74,74,0.15)', color: status[0] === '✓' ? '#24a65a' : '#f04a4a' } }, status),
-    R.createElement('div', { style: { background: 'rgba(255,255,255,0.03)', borderRadius: 4, padding: 12, fontSize: 11, color: '#8f98a0', lineHeight: 1.5 } },
-      R.createElement('div', { style: { fontWeight: 600, color: '#c6d4df', marginBottom: 4 } }, 'How to get your key:'),
-      R.createElement('div', null, '1. Click "Get a free key" above'),
-      R.createElement('div', null, '2. Create a GG.deals account (free)'),
-      R.createElement('div', null, '3. Confirm your email'),
-      R.createElement('div', null, '4. Copy your API key and paste it here'),
-    ),
+  if (!loaded) return <div style={{ padding: 16, color: '#c6d4df' }}>Loading...</div>;
+
+  return (
+    <div style={{ padding: 16 }}>
+      <Field label="GG.deals API Key" description={key ? `Current: ${mask(key)}` : 'No key configured'} bottomSeparator="standard" childrenLayout="below">
+        <input
+          type="password"
+          value={key}
+          onChange={(e: { target: { value: string } }) => setKey(e.target.value)}
+          style={{ width: '100%', padding: '8px 10px', fontSize: 13, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(128,128,128,0.3)', borderRadius: 2, color: 'inherit', outline: 'none', boxSizing: 'border-box' as const }}
+        />
+      </Field>
+
+      <Focusable style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 12 }}>
+        <DialogButton onClick={save} style={btnStyle}>
+          Save
+        </DialogButton>
+        <DialogButton onClick={() => openExt(GG_URL)} style={btnStyle}>
+          Get a free key
+        </DialogButton>
+      </Focusable>
+
+      {status && (
+        <div style={{
+          fontSize: 12, marginBottom: 12, padding: '6px 10px', borderRadius: 2,
+          background: status[0] === '✓' ? 'rgba(36,166,90,0.15)' : 'rgba(240,74,74,0.15)',
+          color: status[0] === '✓' ? '#24a65a' : '#f04a4a',
+        }}>
+          {status}
+        </div>
+      )}
+
+      <Field label="How to get your key:" bottomSeparator="none" childrenLayout="below">
+        <div style={{ fontSize: 11, color: '#8f98a0', lineHeight: 1.5 }}>
+          <div>1. Click "Get a free key" above</div>
+          <div>2. Create a GG.deals account (free)</div>
+          <div>3. Confirm your email</div>
+          <div>4. Copy your API key and paste it here</div>
+        </div>
+      </Field>
+    </div>
   );
 }
 
@@ -287,7 +307,7 @@ export default definePlugin(() => {
   });
   return {
     title: 'NicePrice',
-    icon: window.SP_REACT.createElement(IconsModule.Settings, null),
-    content: window.SP_REACT.createElement(Settings, null),
+    icon: <IconsModule.Settings />,
+    content: <Settings />,
   };
 });
