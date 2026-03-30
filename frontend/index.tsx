@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Millennium, IconsModule, definePlugin, callable, TextField, DialogButton, Field, Focusable } from '@steambrew/client';
+import { Millennium, IconsModule, definePlugin, callable, DialogButton, Field, Focusable } from '@steambrew/client';
 import type { MilleniumWindowContext } from './types/millennium';
+import { ApiResponse } from '../shared/types';
+import { fmt, escapeHtml, ICONS } from '../shared/utils';
 
 const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices');
 const getApiKey = callable<[], string>('get_api_key');
@@ -65,32 +67,12 @@ const CSS = `
 .np-setup-link:hover { color:var(--np-text); }
 `;
 
-const ICONS = {
-  retail: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#beee11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
-  key: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f5a623" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
-  clock: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-};
-
-interface Prices { currentRetail: string|null; currentKeyshops: string|null; historicalRetail: string|null; historicalKeyshops: string|null; currency: string; }
-interface Game { title: string; url: string; prices: Prices; }
-interface Response { success: boolean; data: Record<string, Game|null>; error?: string; }
-
 function detectAppId(): number | null {
   try {
     const p = window.MainWindowBrowserManager?.m_lastLocation?.pathname;
     if (p) { const m = p.match(/\/app\/(\d+)/); if (m) return parseInt(m[1], 10); }
   } catch {}
   return null;
-}
-
-function fmt(val: string|null, cur: string): string {
-  if (!val) return '';
-  const n = parseFloat(val);
-  if (isNaN(n)) return '';
-  if (n === 0) return 'FREE';
-  const sym: Record<string,string> = { EUR:'€', USD:'$', GBP:'£', PLN:'zł', BRL:'R$', CHF:'CHF', DKK:'kr', NOK:'kr', SEK:'kr', CAD:'CA$', AUD:'A$' };
-  const s = sym[cur] || cur;
-  return ['EUR','PLN','BRL','CHF','DKK','NOK','SEK'].includes(cur) ? `${n.toFixed(2)}${s}` : `${s}${n.toFixed(2)}`;
 }
 
 function wireClicks(el: HTMLElement) {
@@ -132,7 +114,6 @@ async function inject(doc: Document, appId: number) {
 
   const w = doc.createElement('div');
   w.id = ID;
-  // apply theme vars
   const colors = readColors(doc);
   w.style.setProperty('--np-bg', colors.bg);
   w.style.setProperty('--np-text', colors.text);
@@ -141,7 +122,7 @@ async function inject(doc: Document, appId: number) {
   w.style.setProperty('--np-border', colors.border);
 
   if (hasKey === false) {
-    w.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">API key required —</span><span class="np-setup-link" data-url="${GG_URL}">Get your free key on GG.deals</span><span class="np-setup-text">then add it in NicePrice settings</span></div></div>`;
+    w.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">API key required —</span><span class="np-setup-link" data-url="${escapeHtml(GG_URL)}">Get your free key on GG.deals</span><span class="np-setup-text">then add it in NicePrice settings</span></div></div>`;
     container.appendChild(w);
     wireClicks(w);
     fetching = null;
@@ -152,7 +133,7 @@ async function inject(doc: Document, appId: number) {
   container.appendChild(w);
 
   try {
-    const resp: Response = JSON.parse(await fetchPrices({ steam_app_id: String(appId) }));
+    const resp: ApiResponse = JSON.parse(await fetchPrices({ steam_app_id: String(appId) }));
     if (curAppId !== appId) { fetching = null; return; }
     const el = doc.getElementById(ID);
     if (!el) { fetching = null; return; }
@@ -160,7 +141,7 @@ async function inject(doc: Document, appId: number) {
     if (!resp.success) {
       if (resp.error === 'no_api_key' || resp.error === 'invalid_api_key') {
         hasKey = false;
-        el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">${resp.error === 'no_api_key' ? 'API key required —' : 'Invalid API key —'}</span><span class="np-setup-link" data-url="${GG_URL}">Get your free key</span><span class="np-setup-text">then add it in settings</span></div></div>`;
+        el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">${resp.error === 'no_api_key' ? 'API key required —' : 'Invalid API key —'}</span><span class="np-setup-link" data-url="${escapeHtml(GG_URL)}">Get your free key</span><span class="np-setup-text">then add it in settings</span></div></div>`;
         wireClicks(el);
       } else {
         el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">${resp.error === 'rate_limited' ? 'Rate limited, try later' : 'Could not load prices'}</span></div>`;
@@ -176,14 +157,14 @@ async function inject(doc: Document, appId: number) {
 
     const { prices: p } = game;
     const cur = p.currency || 'EUR';
-    const url = game.url || `https://gg.deals/steam-app/${appId}/`;
+    const safeUrl = escapeHtml(game.url || `https://gg.deals/steam-app/${appId}/`);
     let html = '';
 
     const retail = fmt(p.currentRetail, cur);
-    if (retail) html += `<div class="np-deal np-retail" data-url="${url}"><span class="np-deal-icon">${ICONS.retail}</span><div class="np-deal-info"><span class="np-deal-store">Best Retail</span><span class="np-deal-price">${retail}</span></div></div>`;
+    if (retail) html += `<div class="np-deal np-retail" data-url="${safeUrl}"><span class="np-deal-icon">${ICONS.retail}</span><div class="np-deal-info"><span class="np-deal-store">Best Retail</span><span class="np-deal-price">${retail}</span></div></div>`;
 
     const keyshop = fmt(p.currentKeyshops, cur);
-    if (keyshop) html += `<div class="np-deal np-keyshop" data-url="${url}"><span class="np-deal-icon">${ICONS.key}</span><div class="np-deal-info"><span class="np-deal-store">Best Keyshop</span><span class="np-deal-price">${keyshop}</span></div></div>`;
+    if (keyshop) html += `<div class="np-deal np-keyshop" data-url="${safeUrl}"><span class="np-deal-icon">${ICONS.key}</span><div class="np-deal-info"><span class="np-deal-store">Best Keyshop</span><span class="np-deal-price">${keyshop}</span></div></div>`;
 
     const hist = [fmt(p.historicalRetail, cur), fmt(p.historicalKeyshops, cur)].filter(Boolean);
     if (hist.length) html += `<div class="np-hist"><span class="np-deal-icon">${ICONS.clock}</span><span class="np-hist-label">Low</span><span class="np-hist-value">${hist.join(' / ')}</span></div>`;
@@ -191,7 +172,7 @@ async function inject(doc: Document, appId: number) {
     if (!html) {
       el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">No deals available</span></div>`;
     } else {
-      el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-deals">${html}</div><span class="np-link" data-url="${url}">GG.deals →</span></div>`;
+      el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-deals">${html}</div><span class="np-link" data-url="${safeUrl}">GG.deals →</span></div>`;
       wireClicks(el);
     }
   } catch {
@@ -211,7 +192,6 @@ function setup(doc: Document) {
   if (observer) { observer.disconnect(); observer = null; }
   curAppId = null; fetching = null;
 
-  // inject styles once
   if (!doc.getElementById('np-styles')) {
     const s = doc.createElement('style'); s.id = 'np-styles'; s.textContent = CSS;
     doc.head.appendChild(s);
@@ -267,12 +247,8 @@ function Settings() {
       </Field>
 
       <Focusable style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 12 }}>
-        <DialogButton onClick={save} style={btnStyle}>
-          Save
-        </DialogButton>
-        <DialogButton onClick={() => openExt(GG_URL)} style={btnStyle}>
-          Get a free key
-        </DialogButton>
+        <DialogButton onClick={save} style={btnStyle}>Save</DialogButton>
+        <DialogButton onClick={() => openExt(GG_URL)} style={btnStyle}>Get a free key</DialogButton>
       </Focusable>
 
       {status && (

@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "outDir": "../.millennium/Dist",
-    "rootDir": "."
+    "rootDir": ".."
   },
-  "include": ["./**/*.ts", "./**/*.tsx"]
+  "include": ["./**/*.ts", "./**/*.tsx", "../shared/**/*.ts"]
 }
