@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Millennium, IconsModule, definePlugin, callable, DialogButton, Field, Focusable } from '@steambrew/client';
+import { Millennium, IconsModule, definePlugin, callable, DialogButton, Dropdown, Field, Focusable, appDetailsClasses } from '@steambrew/client';
 import type { MilleniumWindowContext } from './types/millennium';
 import { ApiResponse } from '../shared/types';
 import { fmt, escapeHtml, ICONS } from '../shared/utils';
@@ -7,6 +7,8 @@ import { fmt, escapeHtml, ICONS } from '../shared/utils';
 const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices');
 const getApiKey = callable<[], string>('get_api_key');
 const saveApiKey = callable<[{ api_key: string }], string>('save_api_key');
+const getRegion = callable<[], string>('get_region');
+const saveRegion = callable<[{ region: string }], string>('save_region');
 
 let curAppId: number | null = null;
 let observer: MutationObserver | null = null;
@@ -14,8 +16,10 @@ let fetching: number | null = null;
 let hasKey: boolean | null = null;
 
 const ID = 'niceprice-widget';
-const CONTAINER = '.NZMJ6g2iVnFsOOp-lDmIP';
+const CONTAINER = `.${appDetailsClasses.Header}`;
 const GG_URL = 'https://gg.deals/api/';
+
+const REGIONS = ['eu', 'us', 'gb', 'fr', 'de', 'pl', 'br', 'ca', 'au', 'ch', 'dk', 'no', 'se', 'be', 'es', 'fi', 'ie', 'it', 'nl'];
 
 const openExt = (url: string) => window.open(`steam://openurl_external/${url}`);
 
@@ -37,7 +41,7 @@ function readColors(doc: Document) {
     }
     const a = doc.querySelector('a[href],button') as HTMLElement;
     if (a) { const ls = doc.defaultView?.getComputedStyle(a); if (ls && ls.color !== c.text) c.accent = ls.color; }
-  } catch {}
+  } catch (e) { console.error('NicePrice: readColors failed', e); }
   return c;
 }
 
@@ -83,20 +87,16 @@ function wireClicks(el: HTMLElement) {
 
 async function checkKey(): Promise<boolean> {
   try { const r = JSON.parse(await getApiKey()); hasKey = (r.api_key || '').length > 0; } catch { hasKey = false; }
-  return hasKey!;
+  return hasKey ?? false;
 }
 
-async function waitContainer(doc: Document, timeout = 3000): Promise<HTMLElement | null> {
-  const found = doc.querySelector(CONTAINER) as HTMLElement;
-  if (found) return found;
-  return new Promise(res => {
-    let t = 0;
-    const iv = setInterval(() => {
-      t += 100;
-      const el = doc.querySelector(CONTAINER) as HTMLElement;
-      if (el || t >= timeout) { clearInterval(iv); res(el); }
-    }, 100);
-  });
+async function waitContainer(doc: Document): Promise<HTMLElement | null> {
+  try {
+    const nodes = await Millennium.findElement(doc, CONTAINER, 3000);
+    return (nodes?.[0] as HTMLElement) || null;
+  } catch {
+    return null;
+  }
 }
 
 async function inject(doc: Document, appId: number) {
@@ -175,7 +175,8 @@ async function inject(doc: Document, appId: number) {
       el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-deals">${html}</div><span class="np-link" data-url="${safeUrl}">GG.deals →</span></div>`;
       wireClicks(el);
     }
-  } catch {
+  } catch (e) {
+    console.error('NicePrice: inject failed', e);
     const el = doc.getElementById(ID);
     if (el) el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">Failed to load</span></div>`;
   }
@@ -204,20 +205,26 @@ function setup(doc: Document) {
 
 function Settings() {
   const [key, setKey] = useState('');
+  const [region, setRegion] = useState('eu');
   const [status, setStatus] = useState('');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    getApiKey().then((raw: string) => {
-      try { const r = JSON.parse(raw); if (r.api_key) setKey(r.api_key); } catch {}
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
+    Promise.all([
+      getApiKey().then((raw: string) => {
+        try { const r = JSON.parse(raw); if (r.api_key) setKey(r.api_key); } catch {}
+      }),
+      getRegion().then((raw: string) => {
+        try { const r = JSON.parse(raw); if (r.region) setRegion(r.region); } catch {}
+      }),
+    ]).finally(() => setLoaded(true));
   }, []);
 
   const save = async () => {
     setStatus('Saving...');
     try {
       const r = JSON.parse(await saveApiKey({ api_key: key.trim() }));
+      await saveRegion({ region });
       hasKey = key.trim().length > 0;
       curAppId = null;
       setStatus(r.success ? (key.trim() ? '✓ Saved' : '✓ Removed') : '✗ Failed');
@@ -243,6 +250,14 @@ function Settings() {
           value={key}
           onChange={(e: { target: { value: string } }) => setKey(e.target.value)}
           style={{ width: '100%', padding: '8px 10px', fontSize: 13, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(128,128,128,0.3)', borderRadius: 2, color: 'inherit', outline: 'none', boxSizing: 'border-box' as const }}
+        />
+      </Field>
+
+      <Field label="Region" description="Determines the currency for prices" bottomSeparator="standard" childrenLayout="below">
+        <Dropdown
+          rgOptions={REGIONS.map(r => ({ data: r, label: r.toUpperCase() }))}
+          selectedOption={region}
+          onChange={(opt) => setRegion(opt.data)}
         />
       </Field>
 

@@ -7,6 +7,7 @@ const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices')
 const ID = 'niceprice-store';
 const STYLES_ID = 'niceprice-store-css';
 const SIDEBAR_SEL = 'div.rightcol.game_meta_data';
+const URL_POLL_INTERVAL = 500;
 
 function ensureStyles() {
   if (document.getElementById(STYLES_ID)) return;
@@ -109,35 +110,41 @@ async function inject(appId: number) {
     w.id = ID;
     w.innerHTML = `${header()}<div class="nps-body"><div class="nps-rows">${rows}</div></div><div class="nps-ftr"><a href="${safeUrl}" target="_blank">View all deals on GG.deals →</a></div>`;
     sidebar.insertBefore(w, findRef(sidebar));
-  } catch {
+  } catch (e) {
+    console.error('NicePrice: store inject failed', e);
     document.getElementById(ID)?.remove();
   }
 }
 
+function getAppIdFromUrl(): number | null {
+  const m = window.location.href.match(/store\.steampowered\.com\/app\/(\d+)/);
+  if (!m) return null;
+  const id = parseInt(m[1], 10);
+  return (isNaN(id) || id <= 0) ? null : id;
+}
+
+async function tryInject() {
+  const id = getAppIdFromUrl();
+  if (!id) return;
+
+  let retries = 0;
+  while (!document.querySelector(SIDEBAR_SEL) && retries < 50) {
+    await new Promise(r => setTimeout(r, 100));
+    retries++;
+  }
+
+  inject(id);
+}
+
 export default async function WebkitMain() {
-  const tryInject = async () => {
-    const m = window.location.href.match(/store\.steampowered\.com\/app\/(\d+)/);
-    if (!m) return;
-    const id = parseInt(m[1], 10);
-    if (isNaN(id) || id <= 0) return;
-
-    let retries = 0;
-    while (!document.querySelector(SIDEBAR_SEL) && retries < 50) {
-      await new Promise(r => setTimeout(r, 100));
-      retries++;
-    }
-
-    inject(id);
-  };
-
   await tryInject();
 
   let lastUrl = window.location.href;
-  new MutationObserver(() => {
+  setInterval(() => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       document.getElementById(ID)?.remove();
       tryInject();
     }
-  }).observe(document.body, { childList: true, subtree: true });
+  }, URL_POLL_INTERVAL);
 }

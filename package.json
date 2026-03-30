@@ -1,6 +1,6 @@
 {
   "name": "nice-price",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Compare game prices across 30+ stores directly in Steam",
   "type": "module",
   "main": "./frontend/index.tsx",

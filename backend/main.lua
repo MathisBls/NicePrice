@@ -41,15 +41,34 @@ function save_api_key(api_key)
     return json.encode({ success = save_settings(s) })
 end
 
+function get_region()
+    local s = load_settings()
+    return json.encode({ success = true, region = s.region or "eu" })
+end
+
+function save_region(region)
+    local s = load_settings()
+    s.region = region or "eu"
+    return json.encode({ success = save_settings(s) })
+end
+
 function fetch_prices(app_id)
-    local key = load_settings().api_key or ""
+    local s = load_settings()
+    local key = s.api_key or ""
     if key == "" then
         return json.encode({ success = false, error = "no_api_key" })
     end
 
+    local id = tonumber(app_id)
+    if not id or id <= 0 then
+        return json.encode({ success = false, error = "invalid_app_id" })
+    end
+
+    local region = s.region or "eu"
+
     local ok, result = pcall(function()
         local resp, err = http.get(
-            API_URL .. "?key=" .. key .. "&ids=" .. tostring(app_id),
+            API_URL .. "?key=" .. key .. "&ids=" .. tostring(id) .. "&region=" .. region,
             { timeout = 10 }
         )
         if not resp then return json.encode({ success = false, error = tostring(err) }) end
@@ -74,4 +93,6 @@ return {
     fetch_prices = fetch_prices,
     get_api_key = get_api_key,
     save_api_key = save_api_key,
+    get_region = get_region,
+    save_region = save_region,
 }
