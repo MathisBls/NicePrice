@@ -9,6 +9,8 @@ const STYLES_ID = 'niceprice-store-css';
 const SIDEBAR_SEL = 'div.rightcol.game_meta_data';
 const URL_POLL_INTERVAL = 500;
 
+const openExt = (url: string) => window.open(`steam://openurl_external/${url}`);
+
 function ensureStyles() {
   if (document.getElementById(STYLES_ID)) return;
   const el = document.createElement('style');
@@ -30,8 +32,10 @@ function ensureStyles() {
 .nps-na { font-size:11px; color:#556b7e; font-style:italic; }
 .nps-div { height:1px; background:rgba(255,255,255,.06); margin:2px 0; }
 .nps-ftr { padding:8px 14px; border-top:1px solid rgba(255,255,255,.04); background:rgba(0,0,0,.1); }
-.nps-ftr a { color:#67c1f5; font-size:11px; text-decoration:none; }
-.nps-ftr a:hover { color:#fff; }
+.nps-ftr a, .nps-link { color:#67c1f5; font-size:11px; text-decoration:none; cursor:pointer; }
+.nps-ftr a:hover, .nps-link:hover { color:#fff; }
+.nps-row.clickable { cursor:pointer; border-radius:2px; padding:4px 8px; margin:-4px -8px; }
+.nps-row.clickable:hover { background:rgba(255,255,255,.06); }
 .nps-msg { padding:10px 14px; color:#556b7e; font-size:12px; }
 .nps-msg a { color:#67c1f5; }
 `;
@@ -46,8 +50,16 @@ function findRef(sidebar: Element) {
   return sidebar.querySelector('[id*="steamdb"],[class*="steamdb"]') || sidebar.firstChild;
 }
 
-function priceRow(icon: string, label: string, value: string, cls: string) {
-  if (value) return `<div class="nps-row"><span class="nps-row-icon">${icon}</span><span class="nps-row-label">${label}</span><span class="nps-val ${cls}">${value}</span></div>`;
+function wireClicks(el: HTMLElement) {
+  el.querySelectorAll<HTMLElement>('[data-url]').forEach(d =>
+    d.addEventListener('click', () => d.dataset.url && openExt(d.dataset.url))
+  );
+}
+
+function priceRow(icon: string, label: string, value: string, cls: string, url?: string) {
+  const clickable = url ? ' clickable' : '';
+  const dataUrl = url ? ` data-url="${url}"` : '';
+  if (value) return `<div class="nps-row${clickable}"${dataUrl}><span class="nps-row-icon">${icon}</span><span class="nps-row-label">${label}</span><span class="nps-val ${cls}">${value}</span></div>`;
   return `<div class="nps-row"><span class="nps-row-icon">${icon}</span><span class="nps-row-label">${label}</span><span class="nps-na">N/A</span></div>`;
 }
 
@@ -70,7 +82,8 @@ async function inject(appId: number) {
       if (!el) return;
       if (resp.error === 'no_api_key' || resp.error === 'invalid_api_key') {
         const msg = resp.error === 'no_api_key' ? 'API key required' : 'Invalid API key';
-        el.innerHTML = `${header(false)}<div class="nps-msg">${msg} — <a href="https://gg.deals/api/" target="_blank">Get a free key</a></div>`;
+        el.innerHTML = `${header(false)}<div class="nps-msg">${msg} — <span class="nps-link" data-url="https://gg.deals/api/">Get a free key</span></div>`;
+        wireClicks(el);
       } else {
         const msgEl = el.querySelector('.nps-msg');
         if (msgEl) msgEl.textContent = resp.error === 'rate_limited' ? 'Rate limited' : 'Could not load';
@@ -94,8 +107,8 @@ async function inject(appId: number) {
 
     const retail = fmt(p.currentRetail, cur);
     const keyshop = fmt(p.currentKeyshops, cur);
-    let rows = priceRow(ICONS.retail, 'Best retail', retail, 'retail');
-    rows += priceRow(ICONS.key, 'Best keyshop', keyshop, 'keyshop');
+    let rows = priceRow(ICONS.retail, 'Best retail', retail, 'retail', safeUrl);
+    rows += priceRow(ICONS.key, 'Best keyshop', keyshop, 'keyshop', safeUrl);
 
     const histParts = [
       fmt(p.historicalRetail, cur) && `Retail: ${fmt(p.historicalRetail, cur)}`,
@@ -108,8 +121,9 @@ async function inject(appId: number) {
     document.getElementById(ID)?.remove();
     const w = document.createElement('div');
     w.id = ID;
-    w.innerHTML = `${header()}<div class="nps-body"><div class="nps-rows">${rows}</div></div><div class="nps-ftr"><a href="${safeUrl}" target="_blank">View all deals on GG.deals →</a></div>`;
+    w.innerHTML = `${header()}<div class="nps-body"><div class="nps-rows">${rows}</div></div><div class="nps-ftr"><span class="nps-link" data-url="${safeUrl}">View all deals on GG.deals →</span></div>`;
     sidebar.insertBefore(w, findRef(sidebar));
+    wireClicks(w);
   } catch (e) {
     console.error('NicePrice: store inject failed', e);
     document.getElementById(ID)?.remove();
