@@ -2,18 +2,48 @@ import { useState, useEffect } from 'react';
 import { Millennium, IconsModule, definePlugin, callable, DialogButton, Dropdown, Field, Focusable, appDetailsClasses } from '@steambrew/client';
 import type { MilleniumWindowContext } from './types/millennium';
 import { ApiResponse } from '../shared/types';
-import { fmt, escapeHtml, ICONS } from '../shared/utils';
+import { fmt, escapeHtml, ICONS, SYMBOLS } from '../shared/utils';
 
 const fetchPrices = callable<[{ steam_app_id: string }], string>('fetch_prices');
 const getApiKey = callable<[], string>('get_api_key');
 const saveApiKey = callable<[{ api_key: string }], string>('save_api_key');
 const getRegion = callable<[], string>('get_region');
 const saveRegion = callable<[{ region: string }], string>('save_region');
+const getPosition = callable<[], string>('get_position');
+const savePosition = callable<[{ position: string }], string>('save_position');
+const getAlert = callable<[{ app_id: string }], string>('get_alert');
+const saveAlert = callable<[{ app_id: string; target: number; title: string }], string>('save_alert');
+const removeAlert = callable<[{ app_id: string }], string>('remove_alert');
+const checkAlerts = callable<[], string>('check_alerts');
 
 let curAppId: number | null = null;
 let observer: MutationObserver | null = null;
 let fetching: number | null = null;
 let hasKey: boolean | null = null;
+
+let curTitle = '';
+let curCurrency = 'EUR';
+let lastBest: number | null = null;
+let mainDoc: Document | null = null;
+
+const ALERT_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+const ALERT_CHECK_DELAY = 30 * 1000;
+
+interface TriggeredAlert {
+  app_id: string; title: string; price: number; currency: string;
+  target: number; type: string; is_low: boolean; url: string;
+}
+
+const POSITIONS = ['tl', 'top', 'tr', 'bl', 'bottom', 'br'] as const;
+type Position = typeof POSITIONS[number];
+let position: Position = 'bottom';
+
+async function loadPosition() {
+  try {
+    const r = JSON.parse(await getPosition());
+    if (POSITIONS.includes(r.position)) position = r.position;
+  } catch {}
+}
 
 const ID = 'niceprice-widget';
 const CONTAINER = `.${appDetailsClasses.Header}`;
@@ -46,8 +76,33 @@ function readColors(doc: Document) {
 }
 
 const CSS = `
-#${ID} { position:absolute; bottom:0; left:0; right:0; z-index:99; pointer-events:auto; }
+#${ID} { position:absolute; z-index:99; pointer-events:auto; }
+#${ID}[data-pos="bottom"] { left:0; right:0; bottom:0; }
+#${ID}[data-pos="top"] { left:0; right:0; top:0; }
+#${ID}[data-pos="tl"] { top:12px; left:12px; max-width:calc(100% - 24px); }
+#${ID}[data-pos="tr"] { top:12px; right:12px; max-width:calc(100% - 24px); }
+#${ID}[data-pos="bl"] { bottom:12px; left:12px; max-width:calc(100% - 24px); }
+#${ID}[data-pos="br"] { bottom:12px; right:12px; max-width:calc(100% - 24px); }
 .np-bar { background:var(--np-bg); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); display:flex; align-items:center; }
+/* compact corner card */
+#${ID}[data-pos="tl"] .np-bar, #${ID}[data-pos="tr"] .np-bar, #${ID}[data-pos="bl"] .np-bar, #${ID}[data-pos="br"] .np-bar { border-radius:12px; overflow:hidden; border:1px solid var(--np-border); box-shadow:0 10px 34px rgba(0,0,0,.5); }
+#${ID}[data-pos="tl"] .np-label, #${ID}[data-pos="tr"] .np-label, #${ID}[data-pos="bl"] .np-label, #${ID}[data-pos="br"] .np-label { display:none; }
+/* move handle + position picker */
+.np-ctrl { position:relative; display:flex; align-self:stretch; flex-shrink:0; }
+.np-grip { display:flex; align-items:center; justify-content:center; width:30px; align-self:stretch; padding:0; background:transparent; border:none; border-right:1px solid var(--np-border); color:var(--np-dim); cursor:pointer; transition:color .15s, background .15s; }
+.np-grip:hover { color:var(--np-text); background:rgba(128,128,128,.15); }
+.np-picker { position:fixed; z-index:99999; padding:7px; border-radius:10px; background:var(--np-bg); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid var(--np-border); box-shadow:0 10px 34px rgba(0,0,0,.55); }
+.np-picker[hidden] { display:none; }
+.np-picker-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; }
+.np-pos { display:flex; align-items:center; justify-content:center; width:30px; height:26px; padding:0; border-radius:6px; background:rgba(128,128,128,.12); border:1px solid transparent; color:var(--np-dim); cursor:pointer; transition:background .15s, color .15s, border-color .15s; }
+.np-pos:hover { background:rgba(128,128,128,.28); color:var(--np-text); }
+.np-pos.active { border-color:var(--np-accent); color:var(--np-accent); background:rgba(128,128,128,.16); }
+.np-pos svg { display:block; }
+.np-pos[data-pos="tl"] svg { transform:rotate(-45deg); }
+.np-pos[data-pos="tr"] svg { transform:rotate(45deg); }
+.np-pos[data-pos="br"] svg { transform:rotate(135deg); }
+.np-pos[data-pos="bottom"] svg { transform:rotate(180deg); }
+.np-pos[data-pos="bl"] svg { transform:rotate(-135deg); }
 .np-label { flex-shrink:0; padding:8px 14px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--np-dim); border-right:1px solid var(--np-border); }
 .np-deals { display:flex; align-items:stretch; flex:1; overflow-x:auto; scrollbar-width:none; }
 .np-deals::-webkit-scrollbar { display:none; }
@@ -69,6 +124,36 @@ const CSS = `
 .np-setup-text { font-size:11px; color:var(--np-dim); }
 .np-setup-link { font-size:11px; color:var(--np-accent); cursor:pointer; text-decoration:underline; font-weight:600; }
 .np-setup-link:hover { color:var(--np-text); }
+/* price-alert bell */
+.np-bell { display:flex; align-items:center; justify-content:center; width:30px; align-self:stretch; padding:0; background:transparent; border:none; border-right:1px solid var(--np-border); color:var(--np-dim); cursor:pointer; transition:color .15s, background .15s; }
+.np-bell:hover { color:var(--np-text); background:rgba(128,128,128,.15); }
+.np-bell.active { color:#67c1f5; }
+.np-bell.active svg { fill:#67c1f5; }
+/* alert popover */
+.np-alert { position:fixed; z-index:99999; width:236px; padding:12px; border-radius:10px; background:var(--np-bg); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid var(--np-border); box-shadow:0 10px 34px rgba(0,0,0,.55); color:var(--np-text); }
+.np-alert[hidden] { display:none; }
+.np-alert-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--np-accent); margin-bottom:4px; }
+.np-alert-game { font-size:12px; color:var(--np-dim); margin-bottom:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.np-alert-row { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+.np-alert-row .lbl { font-size:11px; color:var(--np-dim); white-space:nowrap; }
+.np-alert-input { flex:1; min-width:0; padding:6px 8px; font-size:13px; background:rgba(0,0,0,.25); border:1px solid var(--np-border); border-radius:4px; color:var(--np-text); outline:none; }
+.np-alert-cur { font-size:13px; color:var(--np-dim); }
+.np-alert-actions { display:flex; gap:6px; }
+.np-alert-save, .np-alert-remove { flex:1; padding:7px; font-size:11px; font-weight:600; border-radius:4px; cursor:pointer; border:1px solid var(--np-border); background:rgba(128,128,128,.15); color:var(--np-text); transition:all .15s; }
+.np-alert-save { background:var(--np-accent); border-color:var(--np-accent); color:#fff; }
+.np-alert-save:hover { filter:brightness(1.12); }
+.np-alert-remove:hover { background:rgba(240,74,74,.2); color:#f04a4a; border-color:rgba(240,74,74,.4); }
+.np-alert-status { font-size:11px; margin-top:8px; color:var(--np-dim); }
+/* toasts */
+#niceprice-toasts { position:fixed; right:16px; bottom:16px; z-index:100000; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+.np-toast { pointer-events:auto; display:flex; align-items:center; gap:10px; width:300px; padding:12px 14px; border-radius:10px; background:var(--np-bg, rgba(14,20,27,.96)); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid var(--np-border, rgba(255,255,255,.12)); box-shadow:0 12px 40px rgba(0,0,0,.6); color:var(--np-text, #fff); cursor:pointer; transform:translateX(120%); opacity:0; transition:transform .3s ease, opacity .3s ease; }
+.np-toast.np-toast-in { transform:translateX(0); opacity:1; }
+.np-toast:hover { filter:brightness(1.08); }
+.np-toast-icon { color:#67c1f5; display:flex; flex-shrink:0; }
+.np-toast-title { font-size:13px; font-weight:700; margin-bottom:2px; }
+.np-toast-price { color:#67c1f5; }
+.np-toast-sub { font-size:11px; color:var(--np-dim, rgba(255,255,255,.6)); display:flex; align-items:center; gap:6px; }
+.np-toast-low { color:#beee11; font-weight:600; }
 `;
 
 function detectAppId(): number | null {
@@ -84,6 +169,217 @@ function wireClicks(el: HTMLElement) {
     d.addEventListener('click', () => d.dataset.url && openExt(d.dataset.url))
   );
 }
+
+const POS_TITLES: Record<Position, string> = {
+  tl: 'Top left', top: 'Top', tr: 'Top right', bl: 'Bottom left', bottom: 'Bottom', br: 'Bottom right',
+};
+
+const PICKER_ID = 'niceprice-picker';
+const ALERT_ID = 'niceprice-alert';
+const TOAST_HOST_ID = 'niceprice-toasts';
+const COLOR_VARS = ['--np-bg', '--np-text', '--np-dim', '--np-accent', '--np-border'];
+
+function controlsHtml() {
+  return `<div class="np-ctrl"><button class="np-grip" title="Move NicePrice">${ICONS.move}</button><button class="np-bell" title="Price alert">${ICONS.bell}</button></div>`;
+}
+
+function placePopover(pop: HTMLElement, anchor: HTMLElement, doc: Document) {
+  const r = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth;
+  const ph = pop.offsetHeight;
+  const vw = doc.defaultView?.innerWidth ?? pw;
+  const vh = doc.defaultView?.innerHeight ?? ph;
+  let top = r.bottom + 8;
+  if (top + ph > vh - 8) top = r.top - 8 - ph;
+  top = Math.max(8, Math.min(top, vh - ph - 8));
+  const left = Math.max(8, Math.min(r.left, vw - pw - 8));
+  pop.style.top = `${top}px`;
+  pop.style.left = `${left}px`;
+}
+
+function autoClose(pop: HTMLElement, anchor: HTMLElement, doc: Document) {
+  const close = (ev: Event) => {
+    const t = ev.target as Node;
+    if (!pop.contains(t) && !anchor.contains(t)) { pop.hidden = true; doc.removeEventListener('mousedown', close); }
+  };
+  doc.addEventListener('mousedown', close);
+}
+
+function applyPos(el: HTMLElement, doc: Document) {
+  el.dataset.pos = position;
+  const picker = doc.getElementById(PICKER_ID);
+  picker?.querySelectorAll<HTMLElement>('.np-pos').forEach(b => b.classList.toggle('active', b.dataset.pos === position));
+}
+
+function buildPicker(el: HTMLElement, doc: Document): HTMLElement {
+  doc.getElementById(PICKER_ID)?.remove();
+  const cells = POSITIONS.map(p => `<button class="np-pos" data-pos="${p}" title="${POS_TITLES[p]}">${ICONS.arrow}</button>`).join('');
+  const picker = doc.createElement('div');
+  picker.id = PICKER_ID;
+  picker.className = 'np-picker';
+  picker.hidden = true;
+  picker.innerHTML = `<div class="np-picker-grid">${cells}</div>`;
+  COLOR_VARS.forEach(v => picker.style.setProperty(v, el.style.getPropertyValue(v)));
+  doc.body.appendChild(picker);
+  return picker;
+}
+
+function wirePosition(el: HTMLElement, doc: Document) {
+  const grip = el.querySelector<HTMLElement>('.np-grip');
+  if (!grip) return;
+  const picker = buildPicker(el, doc);
+
+  grip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!picker.hidden) { picker.hidden = true; return; }
+    picker.hidden = false;
+    placePopover(picker, grip, doc);
+    autoClose(picker, grip, doc);
+  });
+
+  picker.querySelectorAll<HTMLElement>('.np-pos').forEach(b =>
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = b.dataset.pos as Position | undefined;
+      if (!p || !POSITIONS.includes(p)) return;
+      position = p;
+      applyPos(el, doc);
+      picker.hidden = true;
+      savePosition({ position: p }).catch(() => {});
+    })
+  );
+}
+
+function curSymbol() {
+  return SYMBOLS[curCurrency] || curCurrency || '';
+}
+
+function buildAlert(el: HTMLElement, doc: Document, existing: number | null): HTMLElement {
+  doc.getElementById(ALERT_ID)?.remove();
+  const prefill = existing ?? lastBest;
+  const value = prefill != null ? String(prefill.toFixed(2)) : '';
+  const pop = doc.createElement('div');
+  pop.id = ALERT_ID;
+  pop.className = 'np-alert';
+  pop.hidden = true;
+  pop.innerHTML =
+    `<div class="np-alert-title">Price alert</div>` +
+    `<div class="np-alert-game">${escapeHtml(curTitle || 'This game')}</div>` +
+    `<div class="np-alert-row"><span class="lbl">Notify below</span><input class="np-alert-input" type="text" inputmode="decimal" value="${value}" placeholder="0.00" /><span class="np-alert-cur">${escapeHtml(curSymbol())}</span></div>` +
+    `<div class="np-alert-actions"><button class="np-alert-save">${existing != null ? 'Update' : 'Set alert'}</button>${existing != null ? '<button class="np-alert-remove">Remove</button>' : ''}</div>` +
+    `<div class="np-alert-status"></div>`;
+  COLOR_VARS.forEach(v => pop.style.setProperty(v, el.style.getPropertyValue(v)));
+  doc.body.appendChild(pop);
+  return pop;
+}
+
+function setBellState(el: HTMLElement, active: boolean) {
+  el.querySelector<HTMLElement>('.np-bell')?.classList.toggle('active', active);
+}
+
+function wireAlert(el: HTMLElement, doc: Document) {
+  const bell = el.querySelector<HTMLElement>('.np-bell');
+  if (!bell) return;
+
+  if (curAppId != null) {
+    getAlert({ app_id: String(curAppId) })
+      .then(raw => { const r = JSON.parse(raw); setBellState(el, !!r.has); })
+      .catch(() => {});
+  }
+
+  bell.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (curAppId == null) return;
+    const open = doc.getElementById(ALERT_ID);
+    if (open && !open.hidden) { open.hidden = true; return; }
+
+    let existing: number | null = null;
+    try { const r = JSON.parse(await getAlert({ app_id: String(curAppId) })); if (r.has) existing = Number(r.target); } catch {}
+
+    const appIdAtOpen = curAppId;
+    const pop = buildAlert(el, doc, existing);
+    const input = pop.querySelector<HTMLInputElement>('.np-alert-input');
+    const status = pop.querySelector<HTMLElement>('.np-alert-status');
+    const saveBtn = pop.querySelector<HTMLButtonElement>('.np-alert-save');
+    const removeBtn = pop.querySelector<HTMLButtonElement>('.np-alert-remove');
+
+    saveBtn?.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const target = parseFloat((input?.value || '').replace(',', '.'));
+      if (isNaN(target) || target < 0) { if (status) status.textContent = '✗ Enter a valid price'; return; }
+      try {
+        const r = JSON.parse(await saveAlert({ app_id: String(appIdAtOpen), target, title: curTitle }));
+        if (r.success) {
+          setBellState(el, true);
+          if (status) status.textContent = `✓ Alert set below ${fmt(String(target), curCurrency)}`;
+          setTimeout(() => { pop.hidden = true; }, 1200);
+          runAlertCheck();
+        } else if (status) status.textContent = '✗ Could not save';
+      } catch { if (status) status.textContent = '✗ Error'; }
+    });
+
+    removeBtn?.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try { await removeAlert({ app_id: String(appIdAtOpen) }); } catch {}
+      setBellState(el, false);
+      pop.hidden = true;
+    });
+
+    pop.hidden = false;
+    placePopover(pop, bell, doc);
+    autoClose(pop, bell, doc);
+    input?.focus();
+  });
+}
+
+function renderBar(el: HTMLElement, doc: Document, inner: string) {
+  el.innerHTML = `<div class="np-bar">${controlsHtml()}${inner}</div>`;
+  wirePosition(el, doc);
+  wireAlert(el, doc);
+  applyPos(el, doc);
+  wireClicks(el);
+}
+
+function showToast(doc: Document, item: TriggeredAlert) {
+  let host = doc.getElementById(TOAST_HOST_ID);
+  if (!host) { host = doc.createElement('div'); host.id = TOAST_HOST_ID; doc.body.appendChild(host); }
+  const t = doc.createElement('div');
+  t.className = 'np-toast';
+  const colors = readColors(doc);
+  t.style.setProperty('--np-bg', colors.bg);
+  t.style.setProperty('--np-text', colors.text);
+  t.style.setProperty('--np-dim', colors.dim);
+  t.style.setProperty('--np-border', colors.border);
+  const price = fmt(String(item.price), item.currency);
+  const target = fmt(String(item.target), item.currency);
+  const low = item.is_low ? '<span class="np-toast-low">Lowest ever</span>' : '';
+  t.innerHTML =
+    `<div class="np-toast-icon">${ICONS.bell}</div>` +
+    `<div class="np-toast-body"><div class="np-toast-title">${escapeHtml(item.title)} <span class="np-toast-price">${price}</span></div>` +
+    `<div class="np-toast-sub">Below your ${target} target ${low}</div></div>`;
+  t.addEventListener('click', () => openExt(item.url));
+  host.appendChild(t);
+  setTimeout(() => t.classList.add('np-toast-in'), 20);
+  setTimeout(() => { t.classList.remove('np-toast-in'); setTimeout(() => t.remove(), 320); }, 10000);
+}
+
+async function runAlertCheck() {
+  const doc = mainDoc;
+  if (!doc?.body) return;
+  try {
+    const r = JSON.parse(await checkAlerts());
+    if (r.success && Array.isArray(r.triggered)) {
+      (r.triggered as TriggeredAlert[]).forEach((it, i) => setTimeout(() => showToast(doc, it), i * 400));
+    }
+  } catch (e) {
+    console.error('NicePrice: alert check failed', e);
+  }
+}
+
+const labelHtml = '<span class="np-label">Prices</span>';
+const msgInner = (t: string) => `${labelHtml}<span class="np-msg">${t}</span>`;
+const setupInner = (prefix: string) =>
+  `${labelHtml}<div class="np-setup"><span class="np-setup-text">${prefix}</span><span class="np-setup-link" data-url="${escapeHtml(GG_URL)}">Get your free key on GG.deals</span><span class="np-setup-text">then add it in NicePrice settings</span></div>`;
 
 async function checkKey(): Promise<boolean> {
   try { const r = JSON.parse(await getApiKey()); hasKey = (r.api_key || '').length > 0; } catch { hasKey = false; }
@@ -121,16 +417,15 @@ async function inject(doc: Document, appId: number) {
   w.style.setProperty('--np-accent', colors.accent);
   w.style.setProperty('--np-border', colors.border);
 
+  container.appendChild(w);
+
   if (hasKey === false) {
-    w.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">API key required —</span><span class="np-setup-link" data-url="${escapeHtml(GG_URL)}">Get your free key on GG.deals</span><span class="np-setup-text">then add it in NicePrice settings</span></div></div>`;
-    container.appendChild(w);
-    wireClicks(w);
+    renderBar(w, doc, setupInner('API key required'));
     fetching = null;
     return;
   }
 
-  w.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">Loading...</span></div>`;
-  container.appendChild(w);
+  renderBar(w, doc, msgInner('Loading...'));
 
   try {
     const resp: ApiResponse = JSON.parse(await fetchPrices({ steam_app_id: String(appId) }));
@@ -141,23 +436,28 @@ async function inject(doc: Document, appId: number) {
     if (!resp.success) {
       if (resp.error === 'no_api_key' || resp.error === 'invalid_api_key') {
         hasKey = false;
-        el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-setup"><span class="np-setup-text">${resp.error === 'no_api_key' ? 'API key required —' : 'Invalid API key —'}</span><span class="np-setup-link" data-url="${escapeHtml(GG_URL)}">Get your free key</span><span class="np-setup-text">then add it in settings</span></div></div>`;
-        wireClicks(el);
+        renderBar(el, doc, setupInner(resp.error === 'no_api_key' ? 'API key required' : 'Invalid API key'));
       } else {
-        el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">${resp.error === 'rate_limited' ? 'Rate limited, try later' : 'Could not load prices'}</span></div>`;
+        renderBar(el, doc, msgInner(resp.error === 'rate_limited' ? 'Rate limited, try later' : 'Could not load prices'));
       }
       fetching = null; return;
     }
 
     const game = resp.data?.[String(appId)];
     if (!game?.prices) {
-      el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">No price data</span></div>`;
+      renderBar(el, doc, msgInner('No price data'));
       fetching = null; return;
     }
 
     const { prices: p } = game;
     const cur = p.currency || 'EUR';
     const safeUrl = escapeHtml(game.url || `https://gg.deals/steam-app/${appId}/`);
+
+    curTitle = game.title || curTitle;
+    curCurrency = cur;
+    const nums = [parseFloat(p.currentRetail || ''), parseFloat(p.currentKeyshops || '')].filter(n => !isNaN(n));
+    lastBest = nums.length ? Math.min(...nums) : null;
+
     let html = '';
 
     const retail = fmt(p.currentRetail, cur);
@@ -170,15 +470,14 @@ async function inject(doc: Document, appId: number) {
     if (hist.length) html += `<div class="np-hist"><span class="np-deal-icon">${ICONS.clock}</span><span class="np-hist-label">Low</span><span class="np-hist-value">${hist.join(' / ')}</span></div>`;
 
     if (!html) {
-      el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">No deals available</span></div>`;
+      renderBar(el, doc, msgInner('No deals available'));
     } else {
-      el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><div class="np-deals">${html}</div><span class="np-link" data-url="${safeUrl}">GG.deals →</span></div>`;
-      wireClicks(el);
+      renderBar(el, doc, `${labelHtml}<div class="np-deals">${html}</div><span class="np-link" data-url="${safeUrl}">GG.deals →</span>`);
     }
   } catch (e) {
     console.error('NicePrice: inject failed', e);
     const el = doc.getElementById(ID);
-    if (el) el.innerHTML = `<div class="np-bar"><span class="np-label">Prices</span><span class="np-msg">Failed to load</span></div>`;
+    if (el) renderBar(el, doc, msgInner('Failed to load'));
   }
   fetching = null;
 }
@@ -186,12 +485,13 @@ async function inject(doc: Document, appId: number) {
 function handlePage(doc: Document) {
   const id = detectAppId();
   if (id && (id !== curAppId || !doc.getElementById(ID))) inject(doc, id);
-  else if (!id && curAppId) { doc.getElementById(ID)?.remove(); curAppId = null; }
+  else if (!id && curAppId) { doc.getElementById(ID)?.remove(); doc.getElementById(PICKER_ID)?.remove(); curAppId = null; }
 }
 
 function setup(doc: Document) {
   if (observer) { observer.disconnect(); observer = null; }
   curAppId = null; fetching = null;
+  mainDoc = doc;
 
   if (!doc.getElementById('np-styles')) {
     const s = doc.createElement('style'); s.id = 'np-styles'; s.textContent = CSS;
@@ -290,12 +590,15 @@ function Settings() {
 
 export default definePlugin(() => {
   checkKey();
+  loadPosition();
   Millennium.AddWindowCreateHook?.((ctx: MilleniumWindowContext) => {
     if (!ctx?.m_strName?.startsWith('SP ')) return;
     const doc = ctx.m_popup?.document;
     if (!doc?.body) return;
     setup(doc);
   });
+  setTimeout(runAlertCheck, ALERT_CHECK_DELAY);
+  setInterval(runAlertCheck, ALERT_CHECK_INTERVAL);
   return {
     title: 'NicePrice',
     icon: <IconsModule.Settings />,
